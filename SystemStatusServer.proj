@@ -1,0 +1,34 @@
+{
+    "configurations": {
+        "debug": {
+            "default": false,
+            "target": "executable",
+            "compiler": "gcc",
+            "linker": "gcc",
+            "archiver": "ar",
+            "output_path": "./bin/debug/",
+            "output_name": "SystemStatusServer",
+            "standard": "c++14",
+            "optimisation": "0",
+            "debug_level": "2",
+            "warnings_as_errors": false,
+            "enable_all_warnings": false,
+            "fatal_errors": false,
+            "include": [
+                "/usr/include/"
+            ],
+            "libs": [
+                "microhttpd",
+                "m",
+                "stdc++",
+                "pthread"
+            ],
+            "define": [
+                "DEBUG_BUILD"
+            ]
+        }
+    },
+    "source_files": [
+        "system-status-server.cpp"
+    ]
+}
