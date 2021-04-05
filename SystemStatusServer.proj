@@ -29,6 +29,8 @@
         }
     },
     "source_files": [
-        "system-status-server.cpp"
+        "./source/system-status-server.cpp",
+        "./source/SystemStatus.cpp",
+        "./source/WebServer.cpp"
     ]
 }
