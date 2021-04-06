@@ -1,17 +1,18 @@
 #ifndef SYSTEM_STATUS_H
 #define SYSTEM_STATUS_H
 
+#include "TinyTools.h"
+
 #include <map>
 #include <thread>
 #include <mutex>
+#include <condition_variable>
 
 class SystemStatus
 {
 public:
-    SystemStatus();
+    SystemStatus(int pUpdateInterval);
     ~SystemStatus();
-
-    bool GetKeepRunning()const{return mKeepRunning;}
 
     /**
      * @brief Thread safe way to get the system status
@@ -25,8 +26,8 @@ public:
     }
 
 private:
-    std::thread mGatherThread;  //<! The worker thread that is gathering all the data for the web server to send out.
-    bool mKeepRunning; //<! A boolean that will be used to signal the worker thread that it should exit.
+    tinytools::threading::SleepableThread mGatherThread;
+    std::map<int,tinytools::system::CPULoadTracking> mCPULoadData;
 
     // This is the data we collect.
     std::string mIpAddress;
@@ -34,7 +35,6 @@ private:
     std::string mUptime;
 
     std::map<int,int> mCPULoads;
-
 
     // This is the built json data ready to do as a string when and if the web server asks for it.
     std::string mJsonSystemStatus;

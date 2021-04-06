@@ -35,6 +35,8 @@
 #include <iostream>
 #include <fstream>
 #include <chrono>
+#include <thread>
+#include <condition_variable>
 
 namespace tinytools{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -142,7 +144,7 @@ inline bool CompareNoCase(const std::string& pA,const std::string& pB,size_t pLe
 
 };//namespace string{
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
-
+namespace timers{
 class MillisecondTicker
 {
 public:
@@ -199,6 +201,7 @@ private:
     std::chrono::system_clock::time_point mTrigger;
 };
 
+};//namespace timers{
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace network{
 
@@ -300,6 +303,50 @@ inline bool GetUptime(uint64_t& rUpDays,uint64_t& rUpHours,uint64_t& rUpMinutes)
 }
 
 /**
+ * @brief Return the uptime as a nice human readable string.
+ */
+inline std::string GetUptime()
+{
+	uint64_t upDays,upHours,upMinutes;
+	GetUptime(upDays,upHours,upMinutes);
+	std::string upTime;
+	if( upDays > 0 )
+	{
+		if( upDays == 1 )
+		{
+			upTime = "1 Day ";
+		}
+		else
+		{
+			upTime = std::to_string(upDays) + " Days ";
+		}
+	}
+
+	if( upHours > 0 )
+	{
+		if( upHours == 1 )
+		{
+			upTime += "1 Hour ";
+		}
+		else
+		{
+			upTime += std::to_string(upHours) + " Hours ";
+		}
+	}
+
+	if( upMinutes == 1 )
+	{
+		upTime += "1 Minute ";
+	}
+	else
+	{
+		upTime += std::to_string(upMinutes) + " Minutes ";
+	}
+
+	return upTime;
+}
+
+/**
  * @brief USed to track the deltas from last time function is called. Needed to be done like this to beable to see instantaneous CPU load. Method copied from htop source.
  * https://www.linuxhowtos.org/manpages/5/proc.htm
  * https://github.com/htop-dev/htop/
@@ -347,19 +394,6 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 				// Read rest of line.
 				std::string eol;
 				std::getline(statFile,eol,'\n');
-/*
-				std::cout << usertimeSTR << " " <<
-					nicetimeSTR << " " <<
-					systemtimeSTR << " " <<
-					idletimeSTR << " " <<
-					ioWaitSTR << " " <<
-					irqSTR << " " <<
-					softIrqSTR << " " <<
-					stealSTR << " " <<
-					guestSTR << " " <<
-					guestniceSTR;
-
-				std::cout << eol << "\n";*/
 
 				const uint64_t userTime = std::stoull(usertimeSTR);	
 				const uint64_t niceTime = std::stoull(nicetimeSTR);
@@ -429,6 +463,60 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 }
 
 };//namespace system{
+///////////////////////////////////////////////////////////////////////////////////////////////////////////
+namespace threading{
+
+/**
+ * @brief This class encapsulates a thread that can sleep for any amount of time but wake up when the ownering, main thread, needs to exit the application.
+ */
+class SleepableThread
+{
+public:
+
+	/**
+	 * @brief This will start the thread and return, pTheWork will be called 'ticked' by the thread after each pause, and exit when asked to.
+	 * pPauseInterval is seconds.
+	 */
+	void Tick(int pPauseInterval,std::function<void()> pTheWork)
+	{
+		if( pTheWork == nullptr )
+		{
+			throw std::runtime_error("SleepableThread passed nullpoint for the work to do...");
+		}
+
+		mWorkerThread = std::thread([this,pPauseInterval,pTheWork]()
+		{
+			while(mKeepGoing)
+			{
+				pTheWork();
+				std::unique_lock<std::mutex> lk(mSleeperMutex);
+				mSleeper.wait_for(lk,std::chrono::seconds(pPauseInterval));
+			};
+		});
+	}
+
+	/**
+	 * @brief Called from another thread, will ask it to exit and then wait for it to do so.
+	 * 
+	 */
+	void TellThreadToExitAndWait()
+	{
+		mKeepGoing = false;
+	    mSleeper.notify_one();
+		if( mWorkerThread.joinable() )
+		{
+			mWorkerThread.join();
+		}
+	}
+
+private:
+    bool mKeepGoing;                  	//!< A boolean that will be used to signal the worker thread that it should exit.
+	std::thread mWorkerThread;			//!< The thread that will do your work and then sleep for a bit. 
+    std::condition_variable mSleeper;   //!< Used to sleep for how long asked for but also wake up if we need to exit.
+    std::mutex mSleeperMutex;			//!< This is used to correctly use the condition variable.
+};
+
+};//namespace threading{
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 class CommandLineOptions
 {

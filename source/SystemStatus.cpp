@@ -5,56 +5,29 @@
 #include <string>
 #include <sstream>
 
-
-SystemStatus::SystemStatus() :
-    mKeepRunning(true)
+SystemStatus::SystemStatus(int pUpdateInterval) 
 {
-    mGatherThread = std::thread([this]()
-    {
-        mJsonSystemStatus = "code booting";
-        tinytools::MillisecondTicker tickEveryMinute(1000 * 60);
+    tinytools::system::GetCPULoad(mCPULoadData,mCPULoads);
 
-        std::map<int,tinytools::system::CPULoadTracking> trackingData;
-        
-        tinytools::system::GetCPULoad(trackingData,mCPULoads);
+    mGatherThread.Tick(pUpdateInterval,[this]()
+    {
         mIpAddress = tinytools::network::GetLocalIP();
         mHostName = tinytools::network::GetHostName();
+        mUptime = tinytools::system::GetUptime();
+
+        tinytools::system::GetCPULoad(mCPULoadData,mCPULoads);
         RebuildJson();
-
-        int n = 0;
-        while( GetKeepRunning() )
-        {
-            bool rebuildJson = false;
-            // This is where we do a lot of work.
-            if( tickEveryMinute.Tick() )
-            {
-                if( tinytools::system::GetCPULoad(trackingData,mCPULoads) )
-                {
-                    rebuildJson = true;
-                }
-            }
-
-            if( rebuildJson )
-            {
-                RebuildJson();
-            }
-
-            // Check again in a second. Not doing big wait here as I need to be able to quit in a timely fashion.
-            // I guess there is a much better way to do this, I will look at some point.....
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
     });
 }
 
 SystemStatus::~SystemStatus()
 {
-    mKeepRunning = false;
-    if( mGatherThread.joinable() )
-    {
-        mGatherThread.join();
-    }
+    mGatherThread.TellThreadToExitAndWait();
 }
 
+/**
+ * @brief Quick and dirty json writer.
+ */
 struct JsonWriter
 {
     std::stringstream ss;
@@ -104,6 +77,11 @@ void SystemStatus::RebuildJson()
     if( mHostName.size() > 0 )
     {
         json.AddObject("name",mHostName);
+    }
+
+    if( mUptime.size() > 0 )
+    {
+        json.AddObject("up_time",mUptime);
     }
 
     if( mCPULoads.size() > 0 )

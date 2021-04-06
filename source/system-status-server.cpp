@@ -35,11 +35,12 @@ void static CtrlHandler(int SigNum)
 int main(int argc, char *argv[])
 {
     int port = 1969;
+	int interval = 10;
 	std::string magicToken;
 
 	tinytools::CommandLineOptions cmdLine("system-status-server [OPTION]...");
 
-	cmdLine.AddArgument('p',"port","Sets the port to listen on, default is 1969",required_argument,[&port](const std::string& pOptionalArgument)
+	cmdLine.AddArgument('p',"port","Sets the port to listen on, default is 1969. allowed range, as defined in RFC 6335, 1024 -> 49151",required_argument,[&port](const std::string& pOptionalArgument)
 	{
 		port = std::stoi(pOptionalArgument);
 	});
@@ -49,14 +50,40 @@ int main(int argc, char *argv[])
 		magicToken = pOptionalArgument;
 	});
 
-	if( cmdLine.Process(argc,argv) == false )
+	cmdLine.AddArgument('i',"update-interval","A number, in seconds, that the service should rebuild it's internal data on the state of the system. Minumum is 10 seconds.",required_argument,[&interval](const std::string& pOptionalArgument)
+	{
+		interval = std::stoi(pOptionalArgument);
+	});
+
+	if( cmdLine.Process(argc,argv) )
+	{
+		// Check out values.
+		if( interval < 10 )
+		{
+			std::cerr << "Update interval is invalid, allowed minumum is 10 seconds, you passed in " << interval << "\n";
+			return EXIT_FAILURE;
+		}
+
+		// Warn about a daft value
+		if( interval > 60*60 )
+		{
+			std::clog << "Warning, interval is greater than an hour, this may not create any information that is of any use\n";
+		}
+
+		// validate the port used, ports 1024-49151 are the User Ports and are the ones to use for your own protocols, see https://www.rfc-editor.org/info/rfc6335 
+		if( port < 1024 || port > 49151 )
+		{
+			std::cerr << "Port number is invalid, allowed range, as defined in RFC 6335 is 1024 -> 49151 Your value " << port << "\n";
+			return EXIT_FAILURE;
+		}
+	}
+	else
 	{
 		return 0;
 	}
-	std::clog << "hosting on port " << port << "\n";
 
 	// Start the thread that gathers the information at different times, collatesthe info and will pass onto the web server using dependency injection.
-	SystemStatus theSystemStatus;
+	SystemStatus theSystemStatus(interval);
 
 	// Start the web server.
 	WebServer theServer(port,magicToken,[&theSystemStatus]()
