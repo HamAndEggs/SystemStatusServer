@@ -5,26 +5,6 @@
 #include <string>
 #include <sstream>
 
-SystemStatus::SystemStatus(int pUpdateInterval) 
-{
-    tinytools::system::GetCPULoad(mCPULoadData,mCPULoads);
-
-    mGatherThread.Tick(pUpdateInterval,[this]()
-    {
-        mIpAddress = tinytools::network::GetLocalIP();
-        mHostName = tinytools::network::GetHostName();
-        mUptime = tinytools::system::GetUptime();
-
-        tinytools::system::GetCPULoad(mCPULoadData,mCPULoads);
-        RebuildJson();
-    });
-}
-
-SystemStatus::~SystemStatus()
-{
-    mGatherThread.TellThreadToExitAndWait();
-}
-
 /**
  * @brief Quick and dirty json writer.
  */
@@ -43,65 +23,136 @@ struct JsonWriter
         return ss.str();
     }
 
-    void AddObject(const std::string& pKey,const std::string& pValue)
+    void AddObject(const std::string& pKey,int pValue)
     {
-        ss << comma << "\"" << pKey << "\":\"" << pValue << "\"";
+        ss << comma << "\"" << pKey << "\":" << pValue;
+        comma = ',';
+        mHasData = true;
+    }   
+
+    void AddObject(const std::string& pKey,int64_t pValue)
+    {
+        ss << comma << "\"" << pKey << "\":" << pValue;
         comma = ',';
         mHasData = true;
     }
 
+    void AddObject(const std::string& pKey,size_t pValue)
+    {
+        ss << comma << "\"" << pKey << "\":" << pValue;
+        comma = ',';
+        mHasData = true;
+    }
+
+    void AddObject(const std::string& pKey,const std::string& pValue)
+    {
+        if( pValue.size() > 0 )
+        {
+            ss << comma << "\"" << pKey << "\":\"" << pValue << "\"";
+            comma = ',';
+            mHasData = true;
+        }
+    }
+
     void ArrayAddObject(const std::string& pKey,const std::string& pValue)
     {
-        ss << comma << "{\"" << pKey << "\":\"" << pValue << "\"}";
+        if( pValue.size() > 0 )
+        {
+            ss << comma << "{\"" << pKey << "\":\"" << pValue << "\"}";
+            comma = ',';
+            mHasData = true;
+        }
+    }
+
+    void ArrayAddValue(const std::string& pValue)
+    {
+        if( pValue.size() > 0 )
+        {
+            ss << comma << "\"" << pValue << "\"";
+            comma = ',';
+            mHasData = true;
+        }
+    }
+
+    void ArrayAddValue(size_t pValue)
+    {
+        ss << comma << pValue;
+        comma = ',';
+        mHasData = true;
+    }
+
+    void ArrayAddValue(int64_t pValue)
+    {
+        ss << comma << pValue;
+        comma = ',';
+        mHasData = true;
+    }
+
+    void ArrayAddValue(int pValue)
+    {
+        ss << comma << pValue;
         comma = ',';
         mHasData = true;
     }
 
     void AddArray(const std::string& pKey,const std::string& pValue)
     {
-        ss << comma << "\"" << pKey << "\":[" << pValue << "]";
-        comma = ',';
-        mHasData = true;
+        if( pValue.size() > 0 )
+        {
+            ss << comma << "\"" << pKey << "\":[" << pValue << "]";
+            comma = ',';
+            mHasData = true;
+        }
     }
+
 };
 
-void SystemStatus::RebuildJson()
+SystemStatus::SystemStatus(int pUpdateInterval) 
 {
-    JsonWriter json;
-
-    if( mIpAddress.size() > 0 )
+    mGatherThread.Tick(pUpdateInterval,[this]()
     {
-        json.AddObject("ip",mIpAddress);
-    }
+        const std::string ipAddress = tinytools::network::GetLocalIP();
+        const std::string hostName = tinytools::network::GetHostName();
+        const std::string uptime = tinytools::system::GetUptime();
 
-    if( mHostName.size() > 0 )
-    {
-        json.AddObject("name",mHostName);
-    }
+        std::map<int,int> cpuLoads;
+        tinytools::system::GetCPULoad(mCPULoadData,cpuLoads);
 
-    if( mUptime.size() > 0 )
-    {
-        json.AddObject("up_time",mUptime);
-    }
+        size_t totalMemory,freeMemory,totalSwap,freeSwap;
+        tinytools::system::GetMemoryUsage(totalMemory,freeMemory,totalSwap,freeSwap);
+        
+        JsonWriter json;
+        
+        json.AddObject("time",tinytools::system::SecondsSinceEpoch());// So caller can see when the data has been updated.
+        json.AddObject("ip",ipAddress);
+        json.AddObject("name",hostName);
+        json.AddObject("up_time",uptime);
 
-    if( mCPULoads.size() > 0 )
-    {
-        JsonWriter loads;
-        for(const auto& core : mCPULoads)
+        json.AddObject("total_memory",totalMemory);
+        json.AddObject("free_memory",freeMemory);
+        json.AddObject("total_swap",totalSwap);
+        json.AddObject("free_swap",freeSwap);
+
+        if( cpuLoads.size() > 0 )
         {
-            std::string key = "cpu";
-            if( core.first >= 0 )
+            JsonWriter loads;
+            for(const auto& core : cpuLoads)
             {
-                key += std::to_string(core.first);
+                loads.ArrayAddValue(core.second);
             }
-            loads.ArrayAddObject(key,std::to_string(core.second));
+            json.AddArray("cpu_load",loads.ToString());
         }
-        json.AddArray("cpu_load",loads.ToString());
-    }
 
-    if( json.mHasData )
-    {
-        std::lock_guard<std::mutex> guard(mJsonSystemStatusMutex);
-        mJsonSystemStatus = "{" + json.ToString() + "}";// Safely make a copy.
-    }
+        // And over write old data safely and a quickly as we can.
+        // Note how I only take the lock when I am ready to write data.
+        {
+            std::lock_guard<std::mutex> guard(mJsonSystemStatusMutex);
+            mJsonSystemStatus = "{" + json.ToString() + "}";// Safely make a copy.
+        }
+    });
+}
+
+SystemStatus::~SystemStatus()
+{
+    mGatherThread.TellThreadToExitAndWait();
 }

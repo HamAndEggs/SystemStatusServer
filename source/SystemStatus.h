@@ -29,18 +29,9 @@ private:
     tinytools::threading::SleepableThread mGatherThread;
     std::map<int,tinytools::system::CPULoadTracking> mCPULoadData;
 
-    // This is the data we collect.
-    std::string mIpAddress;
-    std::string mHostName;
-    std::string mUptime;
-
-    std::map<int,int> mCPULoads;
-
     // This is the built json data ready to do as a string when and if the web server asks for it.
     std::string mJsonSystemStatus;
     mutable std::mutex mJsonSystemStatusMutex;
-
-    void RebuildJson();
 
 };
 

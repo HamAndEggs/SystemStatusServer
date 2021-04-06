@@ -25,7 +25,6 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-
 #include <vector>
 #include <string>
 #include <map>
@@ -37,6 +36,12 @@
 #include <chrono>
 #include <thread>
 #include <condition_variable>
+
+/**
+ * @brief Adds line and source file. There is a c++20 way now that is better. I need to look at that.
+ */
+#define TINYTOOLS_THROW(THE_MESSAGE__)	{throw std::runtime_error("At: " + std::to_string(__LINE__) + " In " + std::string(__FILE__) + " : " + std::string(THE_MESSAGE__));}
+
 
 namespace tinytools{	// Using a namespace to try to prevent name clashes as my class name is kind of obvious. :)
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -76,7 +81,13 @@ inline std::vector<std::string> SplitString(const std::string& pString, const ch
 {
 	std::vector<std::string> res;
 	for (size_t p = 0, q = 0; p != pString.npos; p = q)
-		res.push_back(pString.substr(p + (p != 0), (q = pString.find(pSeperator, p + 1)) - p - (p != 0)));
+	{
+		const std::string part(pString.substr(p + (p != 0), (q = pString.find(pSeperator, p + 1)) - p - (p != 0)));
+		if( part.size() > 0 )
+		{
+			res.push_back(part);
+		}
+	}
 	return res;
 }
 
@@ -272,6 +283,14 @@ inline std::string GetHostName()
 namespace system{
 
 /**
+ * @brief Returns seconds since 1970, the epoch. I put this is as I can never rememeber the correct construction using c++ :D
+ */
+inline int64_t SecondsSinceEpoch()
+{
+	return std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+}
+
+/**
  * @brief Fetches the system uptime in a more human readable format
  */
 inline bool GetUptime(uint64_t& rUpDays,uint64_t& rUpHours,uint64_t& rUpMinutes)
@@ -410,7 +429,7 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 					sscanf(what.data(),"cpu%d",&cpuID);
 					if( cpuID < 0 || cpuID > 128 )
 					{
-						throw std::runtime_error("Error in GetCPULoad, cpu Id read from /proc/stat has a massive index, not going ot happen mate... cpuID == " + std::to_string(cpuID));
+						TINYTOOLS_THROW("Error in GetCPULoad, cpu Id read from /proc/stat has a massive index, not going ot happen mate... cpuID == " + std::to_string(cpuID));
 					}
 				}
 
@@ -418,7 +437,7 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 				{
 					if( pTrackingData.find(cpuID) != pTrackingData.end() )
 					{
-						throw std::runtime_error("Error in GetCPULoad, trying to initalising and found a duplicate CPU id, something went wrong. cpuID == " + std::to_string(cpuID));
+						TINYTOOLS_THROW("Error in GetCPULoad, trying to initalising and found a duplicate CPU id, something went wrong. cpuID == " + std::to_string(cpuID));
 					}
 
 					CPULoadTracking info;
@@ -432,7 +451,7 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 					auto core = pTrackingData.find(cpuID);
 					if( core == pTrackingData.end() )
 					{
-						throw std::runtime_error("Error in GetCPULoad, trying to workout load but found a new CPU id, something went wrong. cpuID == " + std::to_string(cpuID));
+						TINYTOOLS_THROW("Error in GetCPULoad, trying to workout load but found a new CPU id, something went wrong. cpuID == " + std::to_string(cpuID));
 					}
 
 					// Copied from htop!
@@ -462,6 +481,51 @@ inline bool GetCPULoad(std::map<int,CPULoadTracking>& pTrackingData,std::map<int
 	return false;
 }
 
+/**
+ * @brief Get the Memory Usage, all values passed back in bytes. So you can make it what you want.
+ */
+inline bool GetMemoryUsage(size_t& rTotalMemory,size_t& rFreeMemory,size_t& rTotalSwap,size_t& rFreeSwap)
+{
+	rTotalMemory = rFreeMemory = rTotalSwap = rFreeSwap = 0;
+	std::ifstream memFile("/proc/meminfo");
+	if( memFile.is_open() )
+	{
+		// Written so that it'll read the lines in any order. Easy to do and safe.
+		while( memFile.eof() == false )
+		{
+			std::string memLine;
+			std::getline(memFile,memLine);
+			if( memLine.size() > 0 )
+			{
+				std::vector<std::string> memParts = string::SplitString(memLine," ");// Have to do like this as maybe two or three parts. key: value [kb]
+				if( memParts.size() != 2 && memParts.size() != 3 )
+				{
+					TINYTOOLS_THROW("Failed to correctly read a line from /proc/meminfo did the format change? Found line \"" + memLine + "\" and split it into " + std::to_string(memParts.size()) + " parts");
+				}
+
+				if( string::CompareNoCase(memParts[0],"MemTotal:") )
+				{
+					rTotalMemory = std::stoull(memParts[1]) * 1024;
+				}
+				else if( string::CompareNoCase(memParts[0],"MemFree:") )
+				{
+					rFreeMemory = std::stoull(memParts[1]) * 1024;
+				}
+				else if( string::CompareNoCase(memParts[0],"SwapTotal:") )
+				{
+					rTotalSwap = std::stoull(memParts[1]) * 1024;
+				}
+				else if( string::CompareNoCase(memParts[0],"SwapFree:") )
+				{
+					rFreeSwap = std::stoull(memParts[1]) * 1024;
+				}
+			}
+		}
+		return true;
+	}
+	return false;
+}
+
 };//namespace system{
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 namespace threading{
@@ -481,7 +545,7 @@ public:
 	{
 		if( pTheWork == nullptr )
 		{
-			throw std::runtime_error("SleepableThread passed nullpoint for the work to do...");
+			TINYTOOLS_THROW("SleepableThread passed nullpoint for the work to do...");
 		}
 
 		mWorkerThread = std::thread([this,pPauseInterval,pTheWork]()
@@ -530,7 +594,7 @@ public:
 	{
 		if( mArguments.find(pArg) != mArguments.end() )
 		{
-			throw std::runtime_error(std::string("class CommandLineOptions: Argument ") + pArg + " has already been registered, can not contine");
+			TINYTOOLS_THROW(std::string("class CommandLineOptions: Argument ") + pArg + " has already been registered, can not contine");
 		}
 		
 		mArguments.emplace(pArg,Argument(pLongArg,pHelp,pArgumentOption,pCallback));
